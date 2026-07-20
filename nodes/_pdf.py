@@ -17,7 +17,7 @@ import io
 
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LAParams, LTTextContainer, LTTextLine
-from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfdocument import PDFDocument, PDFPasswordIncorrect
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 
@@ -123,7 +123,13 @@ def doc_info(pdf):
     raw = load_bytes(pdf)
     fp = io.BytesIO(raw)
     parser = PDFParser(fp)
-    doc = PDFDocument(parser, password=_password(pdf))
+    try:
+        doc = PDFDocument(parser, password=_password(pdf))
+    except PDFPasswordIncorrect:
+        # The document is encrypted and we lack the (correct) password. We can't
+        # read its pages or metadata, but "it is encrypted" is exactly the fact
+        # GetInfo exists to report here — surface it rather than a bare error.
+        return True, {}, 0, False
     encrypted = getattr(doc, "encryption", None) is not None
 
     info = {}
@@ -133,11 +139,14 @@ def doc_info(pdf):
             for k, v in raw_info.items():
                 info[str(k)] = _decode_val(v)
 
+    # Count pages, peeking one past the cap so an exactly-cap-sized document is
+    # not falsely marked truncated. Iteration is bounded to HARD_MAX_PAGES + 1.
     count = 0
     truncated = False
     for _ in PDFPage.create_pages(doc):
         count += 1
-        if count >= HARD_MAX_PAGES:
+        if count > HARD_MAX_PAGES:
+            count = HARD_MAX_PAGES
             truncated = True
             break
     return encrypted, info, count, truncated

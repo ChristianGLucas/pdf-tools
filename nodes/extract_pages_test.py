@@ -28,6 +28,6 @@ def test_truncates_at_cap(ax, three_page_pdf):
 
 
 def test_malformed_returns_error(ax):
-    r = extract_pages(ax, Pdf(data=b"%PDF-1.4 but truncated garbage \x00\x01"))
-    # No valid pages -> either empty pages or a structured error; never a crash.
+    r = extract_pages(ax, Pdf(data=b"this is not a pdf"))
+    assert r.error != ""
     assert len(r.pages) == 0

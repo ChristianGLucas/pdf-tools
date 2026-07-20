@@ -1,0 +1,142 @@
+// Data contracts for christiangeorgelucas/pdf-tools — stateless PDF text &
+// layout extraction wrapping the MIT-licensed pdfminer.six library.
+//
+// All nodes consume the single `Pdf` input envelope (raw bytes + options) and
+// emit a purpose-shaped result. Coordinates in layout results use PDF user-space
+// units (points, 1/72 inch) with the origin at the BOTTOM-LEFT of the page, which
+// is pdfminer.six's native coordinate system.
+
+syntax = "proto3";
+
+package christiangeorgelucas.pdf_tools;
+
+// A PDF document to analyze, plus per-call limits. The single input envelope
+// shared by every node in this package.
+message Pdf {
+  // Raw PDF file bytes (base64-encoded over JSON). Must begin with a `%PDF-`
+  // header within the first 1KB. Hard size cap of 30 MB applies before parsing.
+  bytes data = 1;
+  // Optional password for an encrypted PDF. Leave empty for unencrypted files
+  // or files encrypted with an empty owner/user password.
+  string password = 2;
+  // Optional cap on the number of pages processed (1-2000). 0 selects the
+  // default cap of 500. Documents with more pages are truncated, not rejected.
+  int32 max_pages = 3;
+}
+
+// Full-document extracted text.
+message TextResult {
+  // Normalized plain text of the document, pages joined by a blank line, in
+  // pdfminer.six's layout-analyzed reading order.
+  string text = 1;
+  // Number of pages actually processed.
+  int32 page_count = 2;
+  // True when the document had more pages than were processed (page cap hit).
+  bool truncated = 3;
+  // Structured error message; empty on success. Set instead of raising on
+  // malformed input, wrong password, or oversized input.
+  string error = 4;
+}
+
+// One page's extracted text.
+message Page {
+  // 1-based page number.
+  int32 number = 1;
+  // Normalized plain text of this page.
+  string text = 2;
+}
+
+// Per-page text segmentation.
+message PagesResult {
+  // Pages in document order.
+  repeated Page pages = 1;
+  // Number of pages actually processed (== pages length).
+  int32 page_count = 2;
+  // True when the document had more pages than were processed (page cap hit).
+  bool truncated = 3;
+  // Structured error message; empty on success.
+  string error = 4;
+}
+
+// A single line of text with its bounding box, in PDF points, origin bottom-left.
+message TextLine {
+  // Text of the line (includes a trailing newline as emitted by pdfminer.six).
+  string text = 1;
+  // Left edge (x0), in PDF points.
+  double x0 = 2;
+  // Bottom edge (y0), in PDF points (origin bottom-left).
+  double y0 = 3;
+  // Right edge (x1), in PDF points.
+  double x1 = 4;
+  // Top edge (y1), in PDF points.
+  double y1 = 5;
+}
+
+// A layout-analyzed text block (paragraph/column region) with its bounding box.
+message TextBlock {
+  // Concatenated text of all lines in the block.
+  string text = 1;
+  // Left edge (x0), in PDF points.
+  double x0 = 2;
+  // Bottom edge (y0), in PDF points (origin bottom-left).
+  double y0 = 3;
+  // Right edge (x1), in PDF points.
+  double x1 = 4;
+  // Top edge (y1), in PDF points.
+  double y1 = 5;
+  // Constituent lines with their own bounding boxes.
+  repeated TextLine lines = 6;
+}
+
+// One page's layout: dimensions plus the text blocks pdfminer.six's layout
+// analysis grouped from character positions.
+message PageLayout {
+  // 1-based page number.
+  int32 number = 1;
+  // Page width in PDF points.
+  double width = 2;
+  // Page height in PDF points.
+  double height = 3;
+  // Text blocks in the order pdfminer.six emitted them.
+  repeated TextBlock blocks = 4;
+}
+
+// Per-page layout with positional metadata for section/table detection.
+message LayoutResult {
+  // Pages in document order, each with its text blocks and bounding boxes.
+  repeated PageLayout pages = 1;
+  // Number of pages actually processed.
+  int32 page_count = 2;
+  // True when the document had more pages than were processed (page cap hit).
+  bool truncated = 3;
+  // Structured error message; empty on success.
+  string error = 4;
+}
+
+// Document-level metadata and structural facts.
+message InfoResult {
+  // Total number of pages (bounded at 2000).
+  int32 page_count = 1;
+  // True if the PDF declares an encryption dictionary.
+  bool encrypted = 2;
+  // Document title from the info dictionary (empty if absent).
+  string title = 3;
+  // Document author (empty if absent).
+  string author = 4;
+  // Document subject (empty if absent).
+  string subject = 5;
+  // Creating application / creator (empty if absent).
+  string creator = 6;
+  // Producer (empty if absent).
+  string producer = 7;
+  // Keywords (empty if absent).
+  string keywords = 8;
+  // Raw creation-date string from the info dictionary (empty if absent).
+  string created = 9;
+  // Raw modification-date string from the info dictionary (empty if absent).
+  string modified = 10;
+  // True when page counting stopped at the 2000-page cap.
+  bool truncated = 11;
+  // Structured error message; empty on success.
+  string error = 12;
+}

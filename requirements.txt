@@ -1,0 +1,11 @@
+# Runtime deps, fully pinned for deterministic builds. Full license audit:
+#   pdfminer.six        MIT
+#   charset-normalizer  MIT
+#   cryptography        Apache-2.0 OR BSD-3-Clause (dual, both permissive)
+#   cffi                MIT
+#   pycparser           BSD-3-Clause
+pdfminer.six==20260107
+charset-normalizer==3.4.9
+cryptography==49.0.0
+cffi==2.1.0
+pycparser==3.0

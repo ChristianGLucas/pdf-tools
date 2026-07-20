@@ -1,0 +1,21 @@
+name: christiangeorgelucas/pdf-tools
+version: 0.1.0
+language: python
+description: Composable Axiom PDF text & layout extraction nodes (full text, per-page text, layout blocks with bounding boxes, document metadata) over a single Pdf envelope, wrapping the MIT-licensed pdfminer.six layout-analysis engine. Stateless, offline, with hard size/page bounds on untrusted input.
+nodes:
+    - name: ExtractText
+      input: Pdf
+      output: TextResult
+      description: Extract the full normalized plain text of a PDF in pdfminer.six's layout-analyzed reading order, with pages joined by a blank line. Returns the number of pages processed and a truncation flag when the page cap is hit. Input is bounded to 30 MB and 2000 pages; malformed input, wrong password, or oversized input returns a structured error rather than crashing.
+    - name: ExtractPages
+      input: Pdf
+      output: PagesResult
+      description: Segment a PDF into per-page text, returning an ordered list of pages each with its 1-based page number and normalized text. Useful for page-level chunking, retrieval, and section detection. Honors the page cap and reports truncation; malformed input yields a structured error.
+    - name: ExtractLayout
+      input: Pdf
+      output: LayoutResult
+      description: Extract positional layout for each page — page dimensions plus the text blocks pdfminer.six's layout analysis groups from character positions, each block and its constituent lines carrying an (x0,y0,x1,y1) bounding box in PDF points (origin bottom-left). The geometry is the raw material for table, column, and heading detection. Bounded and error-safe on untrusted input.
+    - name: GetInfo
+      input: Pdf
+      output: InfoResult
+      description: Read document-level metadata and structural facts from a PDF — total page count (bounded at 2000), whether it is encrypted, and info-dictionary fields (title, author, subject, creator, producer, keywords, creation/modification dates). A cheap way to triage or route a document before full extraction. Returns a structured error on malformed input.

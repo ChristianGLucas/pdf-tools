@@ -113,6 +113,161 @@ message LayoutResult {
   string error = 4;
 }
 
+// One entry in a document's outline (bookmark / table-of-contents) tree.
+message OutlineEntry {
+  // Nesting depth; 0 for a top-level entry, 1 for its children, etc.
+  int32 level = 1;
+  // Bookmark title text.
+  string title = 2;
+  // 1-based target page number when the entry resolves to an internal page
+  // destination; 0 if it targets something else (an external/URI link, a
+  // remote-file destination, or a destination pdfminer.six could not resolve).
+  int32 page = 3;
+  // Target URI when the entry is an external web link (a /URI action);
+  // empty otherwise.
+  string uri = 4;
+}
+
+// A document's outline / bookmark tree, flattened to entry order (a
+// depth-first walk; `level` reconstructs the hierarchy).
+message OutlineResult {
+  repeated OutlineEntry entries = 1;
+  // True when the outline had more entries than were processed (entry cap hit).
+  bool truncated = 2;
+  // Structured error message; empty on success. A well-formed PDF with no
+  // outline/bookmarks at all is NOT an error — it returns zero entries.
+  string error = 3;
+}
+
+// A single page annotation: a comment, highlight, hyperlink, form-field
+// widget marker, or similar markup object.
+message Annotation {
+  // 1-based page number the annotation appears on.
+  int32 page = 1;
+  // Annotation subtype exactly as declared in the PDF (e.g. "Link", "Text",
+  // "Highlight", "FreeText", "Popup", "Widget", "Square").
+  string subtype = 2;
+  // Bounding box in PDF points, origin bottom-left.
+  double x0 = 3;
+  double y0 = 4;
+  double x1 = 5;
+  double y1 = 6;
+  // Comment/note text (the /Contents entry), decoded; empty if absent.
+  string contents = 7;
+  // Author of the annotation (the /T entry on markup annotations); empty if absent.
+  string author = 8;
+  // Target URI when this annotation is a hyperlink with a /URI action;
+  // empty otherwise.
+  string uri = 9;
+  // 1-based internal target page when this annotation is an internal jump
+  // link (a GoTo action or a /Dest entry); 0 if not an internal link or
+  // unresolvable.
+  int32 dest_page = 10;
+}
+
+// Every annotation (including hyperlinks) found on the processed pages.
+message AnnotationsResult {
+  repeated Annotation annotations = 1;
+  // True when more annotations existed than were processed (annotation cap
+  // hit, or the page cap truncated the pages scanned).
+  bool truncated = 2;
+  string error = 3;
+}
+
+// One AcroForm interactive field and its current value.
+message FormField {
+  // Fully-qualified field name (dot-joined parent.child, as PDF viewers show it).
+  string name = 1;
+  // Field type: "Tx" (text), "Btn" (button/checkbox/radio), "Ch" (choice/list
+  // or combo box), "Sig" (signature), or empty if undeclared.
+  string field_type = 2;
+  // Current value, decoded to a string ("" if unset). For a checkbox/radio
+  // this is the selected export name (e.g. "Yes", "Off").
+  string value = 3;
+  // 1-based page the field's widget appears on; 0 if it could not be
+  // resolved to a single page.
+  int32 page = 4;
+}
+
+// The AcroForm's interactive field values.
+message FormFieldsResult {
+  repeated FormField fields = 1;
+  // True when the form had more fields than were processed (field cap hit).
+  bool truncated = 2;
+  // True if the document declares an /AcroForm dictionary at all. A form
+  // with zero fields still has has_form = true and an empty `fields` list;
+  // a document with no form at all has has_form = false.
+  bool has_form = 3;
+  string error = 4;
+}
+
+// One embedded raster image and its pixel/compressed data.
+message EmbeddedImage {
+  // 1-based page number the image appears on.
+  int32 page = 1;
+  // Internal resource name (e.g. "Im0"), for reference/dedup only.
+  string name = 2;
+  // Placement bounding box on the page, in PDF points, origin bottom-left.
+  double x0 = 3;
+  double y0 = 4;
+  double x1 = 5;
+  double y1 = 6;
+  // Source pixel dimensions as declared by the image XObject.
+  int32 width = 7;
+  int32 height = 8;
+  // Bits per color component.
+  int32 bits_per_component = 9;
+  // Colorspace name(s) as declared (e.g. "DeviceRGB", "DeviceGray", "Indexed").
+  repeated string colorspace = 10;
+  // Format of `data`: "jpeg" (DCTDecode, pass-through JPEG file bytes), "jp2"
+  // (JPXDecode, pass-through JPEG2000 bytes), "raw" (fully decompressed
+  // interleaved sample data, row-major, no container), or "unsupported" (a
+  // filter pdfminer.six cannot decode, e.g. CCITT fax/JBIG2 — data is empty).
+  string format = 11;
+  // Image bytes per `format` above (base64-encoded over JSON). Empty when
+  // format == "unsupported" or when decoding exceeded the per-image byte
+  // cap (see truncated_data) — metadata fields above are still populated.
+  bytes data = 12;
+  // True if this image's data was omitted for exceeding the per-image byte cap.
+  bool truncated_data = 13;
+}
+
+// Every embedded image found on the processed pages.
+message ImagesResult {
+  repeated EmbeddedImage images = 1;
+  // True when more images existed than were processed (image cap hit, or
+  // the page cap truncated the pages scanned).
+  bool truncated = 2;
+  string error = 3;
+}
+
+// Usage of one (font, size) pair on a page.
+message FontUsage {
+  // Font's base name as declared (e.g. "Helvetica", "ABCDEF+Calibri-Bold";
+  // a "SUBSET+" prefix indicates a font subset embedded in the document).
+  string name = 1;
+  // Font size in points as rendered.
+  double size = 2;
+  // Number of characters rendered with this font+size on the page.
+  int32 char_count = 3;
+}
+
+// One page's distinct (font, size) usage, ordered by descending char_count.
+message PageFonts {
+  int32 number = 1;
+  repeated FontUsage fonts = 2;
+}
+
+// Per-page font/character-property inventory — which fonts and sizes are
+// used where, and how much. Useful for heading/style detection, font
+// audits, and redaction/compliance checks.
+message FontsResult {
+  repeated PageFonts pages = 1;
+  int32 page_count = 2;
+  bool truncated = 3;
+  string error = 4;
+}
+
 // Document-level metadata and structural facts.
 message InfoResult {
   // Total number of pages (bounded at 2000).

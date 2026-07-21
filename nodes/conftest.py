@@ -134,3 +134,159 @@ def pdf_with_metadata():
             "Keywords": "q1 finance report",
         },
     )
+
+
+# ── Structural oracle (outline / annotations / AcroForm) ──────────────────────
+# Below the character/geometry level exercised above, these PDFs are built by
+# hand at the OBJECT-GRAPH level — raw dictionaries, indirect references, and
+# a hand-computed xref table — again with no dependency on pdfminer.six or any
+# other PDF library. The known object graph (which page an outline entry
+# targets, which annotation carries which URI, which AcroForm field holds
+# which value) is the independent ground truth these new nodes are checked
+# against.
+
+def _build_pdf(objs: dict) -> bytes:
+    """Assemble a valid single-revision PDF from {objnum: body_bytes}, with a
+    correct xref table and a trailer rooted at object 1. Shared low-level
+    assembler for the structural-oracle fixtures below.
+    """
+    header = b"%PDF-1.7\n"
+    out = bytearray(header)
+    offsets = {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        out += _pdf_obj(num, objs[num])
+    xref_pos = len(out)
+    size = max(objs) + 1
+    out += f"xref\n0 {size}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for num in range(1, size):
+        if num in offsets:
+            out += f"{offsets[num]:010d} 00000 n \n".encode()
+        else:
+            out += b"0000000000 00000 f \n"
+    out += (f"trailer\n<< /Size {size} /Root 1 0 R >>\n"
+            f"startxref\n{xref_pos}\n%%EOF").encode()
+    return bytes(out)
+
+
+@pytest.fixture
+def structural_pdf():
+    """A 3-page PDF with a known outline, page-1 annotations, and an
+    AcroForm — the independent oracle for ExtractOutline, ExtractAnnotations,
+    and ExtractFormFields.
+
+    Known object graph (asserted verbatim by the tests):
+      - Outline: "Intro" -> internal GoTo to page 2 (level 1, pdfminer.six's
+        own numbering for a top-level entry); "External Ref" -> URI
+        https://example.com/ref (unresolvable to a page, so page == 0).
+      - Page 1 annotations: a Link (URI https://example.com/report), a Text
+        note ("Reviewer note here" by "Ada Lovelace"), and two Widget
+        annotations that are also the AcroForm's two field widgets.
+      - AcroForm fields: "full_name" (Tx, value "Ada Lovelace", page 1) and
+        "subscribe" (Btn, value "Yes", page 1).
+      - Page 3 has no annotations and is not referenced by the outline —
+        the negative case within the same document.
+    """
+    s1 = b"BT /F1 24 Tf 72 700 Td (Page one) Tj ET"
+    s2 = b"BT /F1 24 Tf 72 700 Td (Page two) Tj ET"
+    s3 = b"BT /F1 24 Tf 72 700 Td (Page three) Tj ET"
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R /AcroForm 30 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> "
+            b"/Annots [40 0 R 41 0 R 42 0 R 43 0 R] >>"),
+        5: (f"<< /Length {len(s1)} >>\nstream\n".encode() + s1 + b"\nendstream"),
+        6: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>"),
+        7: (f"<< /Length {len(s2)} >>\nstream\n".encode() + s2 + b"\nendstream"),
+        8: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 9 0 R /Resources << /Font << /F1 3 0 R >> >> >>"),
+        9: (f"<< /Length {len(s3)} >>\nstream\n".encode() + s3 + b"\nendstream"),
+        # Page-1 annotations: Link (URI), Text (comment), 2 form widgets.
+        40: (b"<< /Type /Annot /Subtype /Link /Rect [72 680 200 710] "
+             b"/A << /S /URI /URI (https://example.com/report) >> >>"),
+        41: (b"<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] "
+             b"/Contents (Reviewer note here) /T (Ada Lovelace) >>"),
+        42: (b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (full_name) "
+             b"/V (Ada Lovelace) /Rect [72 600 300 620] >>"),
+        43: (b"<< /Type /Annot /Subtype /Widget /FT /Btn /T (subscribe) "
+             b"/V /Yes /AS /Yes /Rect [72 570 90 588] >>"),
+        # Outline: Intro -> internal GoTo page 2; External Ref -> URI.
+        20: b"<< /Type /Outlines /First 21 0 R /Last 22 0 R /Count 2 >>",
+        21: (b"<< /Title (Intro) /Parent 20 0 R /Next 22 0 R "
+             b"/Dest [6 0 R /XYZ null null null] >>"),
+        22: (b"<< /Title (External Ref) /Parent 20 0 R /Prev 21 0 R "
+             b"/A << /S /URI /URI (https://example.com/ref) >> >>"),
+        # AcroForm: one text field, one checkbox (the same widgets as 42/43).
+        30: b"<< /Fields [42 0 R 43 0 R] >>",
+    }
+    return _build_pdf(objs)
+
+
+@pytest.fixture
+def no_structure_pdf():
+    """A plain 1-page PDF with no outline, no annotations, no AcroForm — the
+    negative-case oracle: every new node must report the ABSENCE of its
+    feature, not an error."""
+    return make_pdf(["Nothing special here"])
+
+
+@pytest.fixture
+def image_pdf():
+    """A 1-page PDF with two embedded images with a known, independently
+    computed pixel/byte oracle:
+      - Im0: 2x2 uncompressed DeviceRGB raw samples (12 bytes, no /Filter) —
+        exercises the "raw" pass-through format.
+      - Im1: DCTDecode-tagged bytes — pdfminer.six passes DCTDecode streams
+        through untouched (it never re-decodes JPEG), so this exercises the
+        "jpeg" format tag via an exact byte round-trip, independent of
+        whether the bytes are a real decodable JPEG.
+    """
+    raw_rgb = bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0])  # oracle pixels
+    jpeg_stub = b"\xff\xd8\xff\xe0FAKEJPEGDATA\xff\xd9"  # oracle "jpeg" bytes
+    content = (b"q 100 0 0 100 10 10 cm /Im0 Do Q\n"
+               b"q 100 0 0 100 150 10 cm /Im1 Do Q")
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] "
+            b"/Contents 5 0 R /Resources << /Font << /F1 3 0 R >> "
+            b"/XObject << /Im0 50 0 R /Im1 51 0 R >> >> >>"),
+        5: (f"<< /Length {len(content)} >>\nstream\n".encode() + content
+            + b"\nendstream"),
+        50: (f"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "
+             f"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {len(raw_rgb)} >>"
+             f"\nstream\n".encode() + raw_rgb + b"\nendstream"),
+        51: (f"<< /Type /XObject /Subtype /Image /Width 4 /Height 4 "
+             f"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode "
+             f"/Length {len(jpeg_stub)} >>\nstream\n".encode() + jpeg_stub
+             + b"\nendstream"),
+    }
+    return _build_pdf(objs), raw_rgb, jpeg_stub
+
+
+@pytest.fixture
+def fonts_pdf():
+    """A 1-page PDF with two known (font, size) runs — the character-count
+    oracle: "Title Text" at 24pt (10 chars) and "Body text goes here" at
+    12pt (20 chars), both in Helvetica.
+    """
+    title, body = "Title Text", "Body text goes here"
+    stream = (
+        f"BT /F1 24 Tf 72 700 Td ({title}) Tj ET "
+        f"BT /F1 12 Tf 72 650 Td ({body}) Tj ET"
+    ).encode()
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>"),
+        5: (f"<< /Length {len(stream)} >>\nstream\n".encode() + stream
+            + b"\nendstream"),
+    }
+    return _build_pdf(objs), title, body

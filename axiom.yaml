@@ -1,7 +1,7 @@
 name: christiangeorgelucas/pdf-tools
-version: 0.1.0
+version: 0.2.0
 language: python
-description: Composable Axiom PDF text & layout extraction nodes (full text, per-page text, layout blocks with bounding boxes, document metadata) over a single Pdf envelope, wrapping the MIT-licensed pdfminer.six layout-analysis engine. Stateless, offline, with hard size/page bounds on untrusted input.
+description: Composable Axiom PDF extraction nodes over a single Pdf envelope, wrapping the MIT-licensed pdfminer.six engine — full text, per-page text, layout blocks with bounding boxes, document metadata, outline/bookmarks, annotations & hyperlinks, AcroForm field values, embedded images, and per-page font/character-property inventories. Stateless, offline, with hard size/page bounds on untrusted input.
 nodes:
     - name: ExtractText
       input: Pdf
@@ -19,3 +19,23 @@ nodes:
       input: Pdf
       output: InfoResult
       description: Read document-level metadata and structural facts from a PDF — total page count (bounded at 2000), whether it is encrypted, and info-dictionary fields (title, author, subject, creator, producer, keywords, creation/modification dates). A cheap way to triage or route a document before full extraction. Returns a structured error on malformed input.
+    - name: ExtractOutline
+      input: Pdf
+      output: OutlineResult
+      description: Extract a PDF's outline / bookmark tree (table of contents), flattened in depth-first order with a level field to reconstruct nesting. Each entry resolves to either a 1-based internal page number (a GoTo destination or action) or a uri (an external web link). A well-formed PDF with no outline at all returns zero entries, not an error. Bounded to 2000 entries; malformed input returns a structured error.
+    - name: ExtractAnnotations
+      input: Pdf
+      output: AnnotationsResult
+      description: Extract every page annotation — comments, highlights, hyperlinks, and form-field widget markers — with its page, subtype, and bounding box. Hyperlinks (Link annotations with a URI or internal GoTo action) carry their target in uri or dest_page; markup annotations carry contents and author text when present. Honors the page cap plus a 5000-annotation cap. Malformed input returns a structured error.
+    - name: ExtractFormFields
+      input: Pdf
+      output: FormFieldsResult
+      description: Read an AcroForm's interactive field values — fully-qualified dotted field name, type (Tx/Btn/Ch/Sig), current value, and the page its widget appears on. has_form is false when the document declares no AcroForm at all, distinct from a form with zero fields. Bounded to 5000 fields; malformed input returns a structured error.
+    - name: ExtractImages
+      input: Pdf
+      output: ImagesResult
+      description: Extract every embedded raster image — page, placement bounding box, source pixel dimensions, colorspace, and the image bytes themselves. JPEG/JPEG2000-filtered images pass through as native file bytes; other filters are fully decompressed to raw interleaved samples; filters pdfminer.six cannot decode (CCITT fax, JBIG2) report as unsupported with empty data. Honors the page cap plus a 200-image cap and a 15 MB per-image byte cap (oversized images report metadata with truncated_data set and empty data). Malformed input returns a structured error.
+    - name: ExtractFonts
+      input: Pdf
+      output: FontsResult
+      description: Inventory the (font, size) pairs actually used on each page, with a per-pair character count, ordered by descending usage — the raw material for heading/style detection via font-size clustering, font audits, and embedded-subset compliance checks. Honors the page cap; malformed input returns a structured error.

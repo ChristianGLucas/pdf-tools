@@ -270,6 +270,65 @@ def image_pdf():
 
 
 @pytest.fixture
+def named_dest_pdf():
+    """A 2-page PDF whose outline entry targets page 2 via a NAMED
+    destination through the modern /Names /Dests tree (as opposed to
+    structural_pdf's explicit [pageref ...] array) — the independent oracle
+    for named-destination resolution, which uses a different pdfminer.six
+    lookup path (`PDFDocument.get_dest`) than an explicit dest array.
+    """
+    s1 = b"BT /F1 24 Tf 72 700 Td (Page one) Tj ET"
+    s2 = b"BT /F1 24 Tf 72 700 Td (Page two) Tj ET"
+    objs = {
+        1: (b"<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R "
+            b"/Names << /Dests 60 0 R >> >>"),
+        2: b"<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>"),
+        5: (f"<< /Length {len(s1)} >>\nstream\n".encode() + s1 + b"\nendstream"),
+        6: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>"),
+        7: (f"<< /Length {len(s2)} >>\nstream\n".encode() + s2 + b"\nendstream"),
+        20: b"<< /Type /Outlines /First 21 0 R /Last 21 0 R /Count 1 >>",
+        21: b"<< /Title (Named Dest) /Parent 20 0 R /Dest (mydest) >>",
+        # The Names-tree /Dests entries are alternating (string-key, value)
+        # pairs; the key is a PDF STRING, which pdfminer.six parses to bytes.
+        60: b"<< /Names [(mydest) [6 0 R /XYZ null null null]] >>",
+    }
+    return _build_pdf(objs)
+
+
+@pytest.fixture
+def radio_group_pdf():
+    """A 1-page PDF with an AcroForm field in the standard Acrobat
+    radio-button-group layout: the FIELD dict carries /FT, /T, and /V, and
+    its two Kids are bare appearance-only /Widget annotations (their own
+    dicts have neither /T nor /V — only /Parent, /AP, /AS, /Rect). This is
+    the common real-world shape `structural_pdf`'s single merged
+    field+widget dict does NOT exercise.
+    """
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /AcroForm 30 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> "
+            b"/Annots [43 0 R 44 0 R] >>"),
+        5: b"<< /Length 10 >>\nstream\nBT ET\nendstream",
+        30: b"<< /Fields [42 0 R] >>",
+        # The field itself: not a page annotation, holds the real value.
+        42: b"<< /FT /Btn /T (color) /V /Red /Kids [43 0 R 44 0 R] >>",
+        # Its two kid widgets: leaf annotations, no own /T or /V.
+        43: (b"<< /Type /Annot /Subtype /Widget /Parent 42 0 R "
+             b"/AS /Red /Rect [72 600 90 618] >>"),
+        44: (b"<< /Type /Annot /Subtype /Widget /Parent 42 0 R "
+             b"/AS /Off /Rect [100 600 118 618] >>"),
+    }
+    return _build_pdf(objs)
+
+
+@pytest.fixture
 def fonts_pdf():
     """A 1-page PDF with two known (font, size) runs — the character-count
     oracle: "Title Text" at 24pt (10 chars) and "Body text goes here" at

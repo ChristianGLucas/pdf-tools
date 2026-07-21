@@ -21,6 +21,18 @@ def test_resolves_internal_and_uri_targets(ax, structural_pdf):
     assert external.uri == "https://example.com/ref"
 
 
+def test_resolves_named_destination(ax, named_dest_pdf):
+    # Regression: a named destination (resolved through the /Names /Dests
+    # tree, PDFDocument.get_dest) must resolve just as an explicit dest
+    # array does. This tree's lookup keys are raw PDF-string BYTES, not str
+    # — decoding before lookup silently breaks every named-destination link.
+    r = extract_outline(ax, Pdf(data=named_dest_pdf))
+    assert r.error == ""
+    assert len(r.entries) == 1
+    assert r.entries[0].title == "Named Dest"
+    assert r.entries[0].page == 2
+
+
 def test_no_outline_returns_empty_not_error(ax, no_structure_pdf):
     r = extract_outline(ax, Pdf(data=no_structure_pdf))
     assert r.error == ""

@@ -191,6 +191,28 @@ def _page_number_map(doc):
     return mapping
 
 
+def _named_dest(doc, name):
+    """Resolve a named destination, trying both key representations PDFs
+    actually use: the modern /Names /Dests tree keys by the raw PDF-string
+    bytes (b"mydest"); the legacy catalog-level /Dests dict keys by the
+    decoded str (dict keys from a PDF dictionary are parsed to str). Passing
+    the wrong type silently fails the lookup (KeyError) even though the
+    destination is well-formed, so both are tried before giving up.
+    """
+    if isinstance(name, bytes):
+        candidates = (name, name.decode("latin-1", "replace"))
+    elif isinstance(name, str):
+        candidates = (name, name.encode("latin-1", "replace"))
+    else:
+        return None
+    for cand in candidates:
+        try:
+            return doc.get_dest(cand)
+        except Exception:
+            continue
+    return None
+
+
 def _dest_to_page(doc, page_map, dest):
     """Resolve a raw Dest value (a name, or an explicit [pageref, ...] array)
     to a 1-based page number, or 0 if it can't be resolved to a local page."""
@@ -198,12 +220,10 @@ def _dest_to_page(doc, page_map, dest):
         return 0
     dest = resolve1(dest)
     if isinstance(dest, (bytes, str)):
-        name = dest if isinstance(dest, str) else dest.decode("latin-1", "replace")
-        try:
-            dest = doc.get_dest(name)
-        except Exception:
+        resolved = _named_dest(doc, dest)
+        if resolved is None:
             return 0
-        dest = resolve1(dest)
+        dest = resolve1(resolved)
     if isinstance(dest, (list, tuple)) and dest:
         target = dest[0]
         if isinstance(target, PDFObjRef):
@@ -370,16 +390,33 @@ def form_fields(pdf):
             f"{parent_name}.{name_part}" if parent_name and name_part
             else (name_part or parent_name)
         )
-        kids = d.get("Kids")
-        if kids:
-            for k in list_value(resolve1(kids)):
-                stack.append((k, full_name))
-            # A pure grouping node (no own /FT or /V) isn't itself a field.
-            if "FT" not in d and "V" not in d:
-                continue
+        kid_refs = list_value(resolve1(d.get("Kids"))) if d.get("Kids") else []
+        for k in kid_refs:
+            stack.append((k, full_name))
+
+        # A node with no own /FT and no own /V isn't itself a field value —
+        # it's either a pure grouping node (a non-terminal field whose real
+        # value lives on a descendant) or, just as commonly, a LEAF widget
+        # kid of a radio-button/checkbox group: the standard AcroForm layout
+        # puts /FT and /V on the parent and leaves each kid as a bare
+        # appearance-only /Widget annotation with no field data of its own.
+        # Emitting an entry for either would be a spurious duplicate of the
+        # real field.
+        if "FT" not in d and "V" not in d:
+            continue
+
         field_type = _decode_val(d.get("FT")) if "FT" in d else ""
         value = _decode_val(d.get("V")) if "V" in d else ""
         page = widget_page.get(objid, 0)
+        if page == 0 and kid_refs:
+            # A non-terminal field (e.g. a radio/checkbox group): the field
+            # dict itself is never a page annotation, only its kid widgets
+            # are — inherit the page from the first kid we can resolve.
+            for k in kid_refs:
+                kobjid = k.objid if isinstance(k, PDFObjRef) else None
+                if kobjid is not None and kobjid in widget_page:
+                    page = widget_page[kobjid]
+                    break
         out.append({
             "name": full_name or "(unnamed)", "field_type": field_type,
             "value": value, "page": page,

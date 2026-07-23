@@ -1,6 +1,6 @@
 # pdf-tools
 
-Composable [Axiom](https://axiom.dev) nodes for **PDF text, layout & structure
+Composable [Axiom](https://axiomide.com) nodes for **PDF text, layout & structure
 extraction**, wrapping the MIT-licensed
 [pdfminer.six](https://github.com/pdfminer/pdfminer.six) engine. Built for the
 Axiom marketplace.
